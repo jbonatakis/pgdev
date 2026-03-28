@@ -33,6 +33,7 @@ Commands:
   test          Run the default Meson test suite
   runningcheck  Run tests against a manually started server
   server        Run postgres in the foreground
+  psql          Connect to the running server with sensible defaults
   shell         Open an interactive shell in the dev container
   clean         Remove the Docker volume used for build and data state
 
@@ -41,6 +42,7 @@ Examples:
   bin/pgdev --source ~/repos/postgresql build
   bin/pgdev --source ~/repos/postgresql test --suite recovery
   bin/pgdev --source ~/repos/postgresql --port 55433 server
+  bin/pgdev --source ~/repos/postgresql psql
 EOF
 }
 
@@ -175,6 +177,15 @@ clean_workspace() {
   docker volume rm -f "$VOLUME_NAME"
 }
 
+run_psql() {
+  command -v psql >/dev/null 2>&1 || die "psql not found on PATH"
+  if [ "${#COMMAND_ARGS[@]}" -gt 0 ]; then
+    PGUSER=postgres PGDATABASE=postgres psql -h localhost -p "$PORT" "${COMMAND_ARGS[@]}"
+  else
+    PGUSER=postgres PGDATABASE=postgres psql -h localhost -p "$PORT"
+  fi
+}
+
 parse_args "$@"
 
 case "$COMMAND" in
@@ -187,6 +198,9 @@ case "$COMMAND" in
     compute_volume_name
     ensure_image
     run_container
+    ;;
+  psql)
+    run_psql
     ;;
   clean)
     derive_source_dir

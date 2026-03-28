@@ -55,7 +55,7 @@ bin/pgdev --source ~/repos/postgresql server
 Connect from another terminal:
 
 ```bash
-psql -h localhost -p 55432 -U postgres -d postgres
+bin/pgdev --source ~/repos/postgresql psql
 ```
 
 
@@ -84,7 +84,7 @@ Normal Edit/Build/Run Flow
 5. Connect:
 
    ```bash
-   psql -h localhost -p 55432 -U postgres -d postgres
+   bin/pgdev --source ~/repos/postgresql psql
    ```
 
 The running server does not hot-reload binaries. If you change code, stop the
@@ -136,6 +136,14 @@ Open a shell:
 
 ```bash
 bin/pgdev --source ~/repos/postgresql shell
+```
+
+Open `psql` with defaults for this workflow:
+
+```bash
+bin/pgdev --source ~/repos/postgresql psql
+bin/pgdev --source ~/repos/postgresql --port 55433 psql
+bin/pgdev --source ~/repos/postgresql psql -c 'select version()'
 ```
 
 Start the server on a different port:
@@ -209,5 +217,6 @@ Notes
 - The source checkout is mounted read-only into the container.
 - Build artifacts live in a Docker volume, not in the PostgreSQL repo.
 - The default database superuser in this workflow is `postgres`.
+- `bin/pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
 - Host TCP access is configured for this dev environment, and the port is
   published only on `127.0.0.1` on the host.
