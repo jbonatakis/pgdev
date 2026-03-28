@@ -1,0 +1,59 @@
+FROM debian:trixie-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV CCACHE_DIR=/workspace/.ccache
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bison \
+        build-essential \
+        ca-certificates \
+        ccache \
+        clang \
+        flex \
+        gettext \
+        git \
+        libcurl4-openssl-dev \
+        libicu-dev \
+        libio-pty-perl \
+        libipc-run-perl \
+        libldap2-dev \
+        liblz4-dev \
+        libnuma-dev \
+        libpam0g-dev \
+        libperl-dev \
+        libreadline-dev \
+        libselinux1-dev \
+        libssl-dev \
+        libsystemd-dev \
+        liburing-dev \
+        libxml2-dev \
+        libxslt1-dev \
+        libzstd-dev \
+        locales \
+        meson \
+        ninja-build \
+        perl \
+        pkg-config \
+        python3 \
+        python3-dev \
+        tcl-dev \
+        uuid-dev \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash postgres \
+    && mkdir -p /workspace/build /workspace/data /workspace/log /workspace/.ccache \
+    && touch /workspace/.volume-initialized \
+    && chown -R postgres:postgres /workspace /home/postgres
+
+COPY docker/dev-entrypoint.sh /usr/local/bin/pg-dev-entrypoint
+RUN chmod +x /usr/local/bin/pg-dev-entrypoint
+
+USER postgres
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/pg-dev-entrypoint"]
+CMD ["shell"]

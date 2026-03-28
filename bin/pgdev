@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+IMAGE_NAME="${PG_DEV_IMAGE:-pgdev-postgresql:local}"
+SOURCE_DIR="${PG_DEV_SOURCE:-}"
+WORKSPACE_KEY="${PG_DEV_WORKSPACE_KEY:-}"
+PORT="${PG_DEV_PORT:-55432}"
+COMMAND_ARGS=()
+
+docker_run_args=(--rm)
+if [ -t 0 ] && [ -t 1 ]; then
+  docker_run_args+=(-it)
+fi
+
+usage() {
+  cat <<EOF
+Usage: bin/pgdev [global-options] <command> [command-args...]
+
+Global options:
+  --source PATH         PostgreSQL checkout to build and run
+  --workspace-key KEY   Stable identifier for the Docker volume
+  --port PORT           Host and container port for the server (default: $PORT)
+  --image NAME          Override the Docker image name
+  -h, --help            Show this help
+
+Commands:
+  build-image   Build or rebuild the toolchain image
+  configure     Create or reconfigure the Meson build directory
+  build         Compile PostgreSQL and test dependencies
+  test          Run the default Meson test suite
+  runningcheck  Run tests against a manually started server
+  server        Run postgres in the foreground
+  shell         Open an interactive shell in the dev container
+  clean         Remove the Docker volume used for build and data state
+
+Examples:
+  bin/pgdev build-image
+  bin/pgdev --source ~/repos/postgresql build
+  bin/pgdev --source ~/repos/postgresql test --suite recovery
+  bin/pgdev --source ~/repos/postgresql --port 55433 server
+EOF
+}
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+safe_name() {
+  local value="$1"
+  value="${value//[^a-zA-Z0-9_.-]/-}"
+  printf '%s' "$value"
+}
+
+parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --source)
+        [ "$#" -ge 2 ] || die "--source requires a path"
+        SOURCE_DIR="$2"
+        shift 2
+        ;;
+      --workspace-key)
+        [ "$#" -ge 2 ] || die "--workspace-key requires a value"
+        WORKSPACE_KEY="$2"
+        shift 2
+        ;;
+      --port)
+        [ "$#" -ge 2 ] || die "--port requires a value"
+        PORT="$2"
+        shift 2
+        ;;
+      --image)
+        [ "$#" -ge 2 ] || die "--image requires a value"
+        IMAGE_NAME="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        die "unknown option: $1"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  COMMAND="${1:-help}"
+  if [ "$#" -gt 0 ]; then
+    shift
+  fi
+  COMMAND_ARGS=("$@")
+}
+
+derive_source_dir() {
+  if [ -n "$SOURCE_DIR" ]; then
+    SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd -P)"
+    return
+  fi
+
+  if [ -f "$PWD/meson.build" ] && [ -f "$PWD/configure" ] && [ -f "$PWD/src/tools/ci/pg_ci_base.conf" ]; then
+    SOURCE_DIR="$(cd "$PWD" && pwd -P)"
+    return
+  fi
+
+  die "no PostgreSQL source checkout specified; use --source PATH"
+}
+
+validate_source_dir() {
+  [ -f "$SOURCE_DIR/meson.build" ] || die "source checkout does not look like PostgreSQL: missing meson.build in $SOURCE_DIR"
+  [ -f "$SOURCE_DIR/configure" ] || die "source checkout does not look like PostgreSQL: missing configure in $SOURCE_DIR"
+  [ -f "$SOURCE_DIR/src/tools/ci/pg_ci_base.conf" ] || die "source checkout does not look like PostgreSQL: missing src/tools/ci/pg_ci_base.conf in $SOURCE_DIR"
+}
+
+compute_volume_name() {
+  if [ -n "${PG_DEV_VOLUME:-}" ]; then
+    VOLUME_NAME="$PG_DEV_VOLUME"
+    return
+  fi
+
+  if [ -z "$WORKSPACE_KEY" ]; then
+    local source_base
+    local source_hash
+
+    source_base="$(basename "$SOURCE_DIR")"
+    source_hash="$(printf '%s' "$SOURCE_DIR" | shasum -a 256 | awk '{print substr($1, 1, 12)}')"
+    WORKSPACE_KEY="${source_base}-${source_hash}"
+  fi
+
+  VOLUME_NAME="pgdev-$(safe_name "$WORKSPACE_KEY")"
+}
+
+build_image() {
+  docker build -f "$TOOL_ROOT/docker/Dockerfile.dev" -t "$IMAGE_NAME" "$TOOL_ROOT"
+}
+
+ensure_image() {
+  if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    build_image
+  fi
+}
+
+run_container() {
+  if [ "${#COMMAND_ARGS[@]}" -gt 0 ]; then
+    docker run "${docker_run_args[@]}" \
+      -e PGPORT="$PORT" \
+      -v "$SOURCE_DIR:/src:ro" \
+      -v "$VOLUME_NAME:/workspace" \
+      -p "127.0.0.1:$PORT:$PORT" \
+      "$IMAGE_NAME" \
+      "$COMMAND" \
+      "${COMMAND_ARGS[@]}"
+  else
+    docker run "${docker_run_args[@]}" \
+      -e PGPORT="$PORT" \
+      -v "$SOURCE_DIR:/src:ro" \
+      -v "$VOLUME_NAME:/workspace" \
+      -p "127.0.0.1:$PORT:$PORT" \
+      "$IMAGE_NAME" \
+      "$COMMAND"
+  fi
+}
+
+clean_workspace() {
+  docker volume rm -f "$VOLUME_NAME"
+}
+
+parse_args "$@"
+
+case "$COMMAND" in
+  build-image)
+    build_image
+    ;;
+  configure|build|test|runningcheck|server|shell)
+    derive_source_dir
+    validate_source_dir
+    compute_volume_name
+    ensure_image
+    run_container
+    ;;
+  clean)
+    derive_source_dir
+    validate_source_dir
+    compute_volume_name
+    clean_workspace
+    ;;
+  help)
+    usage
+    ;;
+  *)
+    die "unknown command: $COMMAND"
+    ;;
+esac
