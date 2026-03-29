@@ -31,6 +31,8 @@ readonly TMP_INSTALL_LIB_BASE
 
 MESON_BASE_ARGS=(
   -Dcassert=true
+  -Ddocs=enabled
+  -Ddocs_pdf=disabled
   -Dinjection_points=true
   --buildtype=debug
   -Dtap_tests=enabled
@@ -135,6 +137,20 @@ build_tree() {
     ninja -C "$BUILD_DIR" -j"$BUILD_JOBS" all testprep "$@"
 }
 
+build_docs() {
+  configure_build
+
+  local doc_targets=("$@")
+  if [ "${#doc_targets[@]}" -eq 0 ]; then
+    doc_targets=(docs)
+  fi
+
+  env CCACHE_DIR="$CCACHE_DIR" \
+    meson compile -C "$BUILD_DIR" "${doc_targets[@]}"
+
+  printf 'built docs under %s/doc/src/sgml\n' "$BUILD_DIR"
+}
+
 run_tests() {
   build_tree
   env CCACHE_DIR="$CCACHE_DIR" \
@@ -213,6 +229,7 @@ Usage: pg-dev-entrypoint <command> [args...]
 Commands:
   configure     Create or reconfigure the Meson build directory
   build         Compile PostgreSQL and test dependencies
+  docs          Build PostgreSQL HTML/man docs
   test          Run the default Meson test suite
   runningcheck  Run tests against a manually started server
   server        Initialize PGDATA if needed and run postgres in foreground
@@ -228,6 +245,10 @@ case "${1:-shell}" in
   build)
     shift
     build_tree "$@"
+    ;;
+  docs)
+    shift
+    build_docs "$@"
     ;;
   test)
     shift

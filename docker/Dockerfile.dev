@@ -12,14 +12,20 @@ RUN apt-get update \
         ca-certificates \
         ccache \
         clang \
+        default-jre-headless \
+        ditaa \
+        docbook-xml \
+        docbook-xsl \
         flex \
         gettext \
         git \
+        graphviz \
         libcurl4-openssl-dev \
         libicu-dev \
         libio-pty-perl \
         libipc-run-perl \
         libldap2-dev \
+        libxml2-utils \
         liblz4-dev \
         libnuma-dev \
         libpam0g-dev \
@@ -41,6 +47,7 @@ RUN apt-get update \
         python3-dev \
         tcl-dev \
         uuid-dev \
+        xsltproc \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 

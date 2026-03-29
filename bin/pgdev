@@ -39,6 +39,8 @@ Commands:
   build-image   Build or rebuild the toolchain image
   configure     Create or reconfigure the Meson build directory
   build         Compile PostgreSQL and test dependencies
+  docs          Build PostgreSQL HTML/man docs
+  getdocs       Export built docs to the host
   test          Run the default Meson test suite
   testlogs      Export Meson test logs to the host
   logreport     Summarize failures and skips from testlog.json
@@ -51,6 +53,10 @@ Commands:
 Examples:
   pgdev build-image
   pgdev --source ~/repos/postgresql build
+  pgdev --source ~/repos/postgresql docs
+  pgdev --source ~/repos/postgresql docs html
+  pgdev --source ~/repos/postgresql getdocs
+  pgdev --source ~/repos/postgresql getdocs ~/Downloads/pgdev-docs
   pgdev --source ~/repos/postgresql test --suite recovery
   pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
   PG_TEST_EXTRA="ssl ldap" pgdev --source ~/repos/postgresql test
@@ -332,6 +338,41 @@ cp -a /workspace/build/meson-logs/. /out/meson-logs/
   printf 'exported meson logs to %s\n' "$dest_dir/meson-logs"
 }
 
+export_docs() {
+  local dest_root
+  local dest_dir
+
+  if [ "${#COMMAND_ARGS[@]}" -gt 1 ]; then
+    die "getdocs accepts at most one destination directory"
+  fi
+
+  if [ "${#COMMAND_ARGS[@]}" -eq 1 ]; then
+    dest_root="${COMMAND_ARGS[0]}"
+  else
+    dest_root="$PWD/pgdev-docs/$(safe_name "$WORKSPACE_KEY")"
+  fi
+
+  mkdir -p "$dest_root"
+  dest_dir="$(cd "$dest_root" && pwd -P)"
+
+  docker run --rm \
+    -v "$VOLUME_NAME:/workspace:ro" \
+    -v "$dest_dir:/out" \
+    "$IMAGE_NAME" \
+    bash -lc '
+set -euo pipefail
+if [ ! -d /workspace/build/doc/src/sgml ]; then
+  echo "built docs not found in /workspace/build/doc/src/sgml" >&2
+  exit 1
+fi
+rm -rf /out/sgml
+mkdir -p /out/sgml
+cp -a /workspace/build/doc/src/sgml/. /out/sgml/
+'
+
+  printf 'exported docs to %s\n' "$dest_dir/sgml"
+}
+
 resolve_logreport_path() {
   local input_path=""
 
@@ -513,7 +554,7 @@ case "$COMMAND" in
   build-image)
     build_image
     ;;
-  configure|build|test|runningcheck|server|shell)
+  configure|build|docs|test|runningcheck|server|shell)
     derive_source_dir
     validate_source_dir
     compute_volume_name
@@ -526,6 +567,13 @@ case "$COMMAND" in
     compute_volume_name
     ensure_image
     export_testlogs
+    ;;
+  getdocs)
+    derive_source_dir
+    validate_source_dir
+    compute_volume_name
+    ensure_image
+    export_docs
     ;;
   logreport)
     if [ "${#COMMAND_ARGS[@]}" -eq 0 ]; then

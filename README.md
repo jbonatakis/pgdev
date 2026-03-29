@@ -133,6 +133,21 @@ Build:
 pgdev --source ~/repos/postgresql build
 ```
 
+Build PostgreSQL HTML/man docs:
+
+```bash
+pgdev --source ~/repos/postgresql docs
+pgdev --source ~/repos/postgresql docs html
+pgdev --source ~/repos/postgresql docs man
+```
+
+Export built docs to the host:
+
+```bash
+pgdev --source ~/repos/postgresql getdocs
+pgdev --source ~/repos/postgresql getdocs ~/Downloads/pgdev-docs
+```
+
 Run the default test set:
 
 ```bash
@@ -278,6 +293,10 @@ Notes
 - Build artifacts live in a Docker volume, not in a local repo.
 - The default database superuser in this workflow is `postgres`.
 - `pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
+- `pgdev docs` builds documentation under `/workspace/build/doc/src/sgml` in
+  the Docker volume.
+- `pgdev getdocs` exports `/workspace/build/doc/src/sgml` to
+  `./pgdev-docs/<workspace-key>/sgml` by default.
 - `pgdev testlogs` exports `/workspace/build/meson-logs` to
   `./pgdev-logs/<workspace-key>/meson-logs` by default.
 - `pgdev logreport` reads `testlog.json` and prints failures and skip
