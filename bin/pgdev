@@ -17,8 +17,10 @@ TEST_EXTRA_ARGS=()
 COMMAND_ARGS=()
 
 docker_run_args=(--rm)
+docker_exec_args=()
 if [ -t 0 ] && [ -t 1 ]; then
   docker_run_args+=(-it)
+  docker_exec_args+=(-it)
 fi
 
 usage() {
@@ -47,7 +49,8 @@ Commands:
   logreport     Summarize failures and skips from testlog.json
   runningcheck  Run tests against a manually started server
   server        Run postgres in the foreground
-  psql          Connect to the running server with sensible defaults
+  exec          Run a command inside the running server container
+  psql          Connect with the matching psql inside the running server container
   shell         Open an interactive shell in the dev container
   clean         Remove the Docker volume used for build and data state
 
@@ -66,6 +69,8 @@ Examples:
   pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
   pgdev --source ~/repos/postgresql testlogs ~/Downloads/pgdev-logs
   pgdev --source ~/repos/postgresql --port 55433 server
+  pgdev --source ~/repos/postgresql exec
+  pgdev --source ~/repos/postgresql exec psql -c 'select version()'
   pgdev --source ~/repos/postgresql psql
 EOF
 }
@@ -198,6 +203,18 @@ compute_volume_name() {
   VOLUME_NAME="pgdev-$(safe_name "$WORKSPACE_KEY")"
 }
 
+compute_server_container_name() {
+  SERVER_CONTAINER_NAME="pgdev-$(safe_name "$WORKSPACE_KEY")-server"
+}
+
+run_docker_exec() {
+  if [ "${#docker_exec_args[@]}" -gt 0 ]; then
+    docker exec "${docker_exec_args[@]}" "$@"
+  else
+    docker exec "$@"
+  fi
+}
+
 build_image() {
   docker build -f "$TOOL_ROOT/docker/Dockerfile.dev" -t "$IMAGE_NAME" "$TOOL_ROOT"
 }
@@ -273,6 +290,15 @@ run_container() {
   combined_test_extra="$(combine_test_extra)"
   docker_args=("${docker_run_args[@]}" --shm-size "$SHM_SIZE" -e PGPORT="$PORT")
 
+  if [ "$COMMAND" = "server" ]; then
+    docker_args+=(
+      --name "$SERVER_CONTAINER_NAME"
+      --label "pgdev.managed=true"
+      --label "pgdev.workspace=$WORKSPACE_KEY"
+      --label "pgdev.role=server"
+    )
+  fi
+
   if [ -n "$BUILD_JOBS" ]; then
     docker_args+=(-e "PG_BUILD_JOBS=$BUILD_JOBS")
   fi
@@ -307,13 +333,63 @@ clean_workspace() {
   docker volume rm -f "$VOLUME_NAME"
 }
 
+ensure_running_server_container() {
+  local is_running=""
+
+  is_running="$(docker container inspect -f '{{.State.Running}}' "$SERVER_CONTAINER_NAME" 2>/dev/null || true)"
+  [ "$is_running" = "true" ] || die "running server container not found for workspace $WORKSPACE_KEY; start it with 'pgdev server'"
+}
+
+exec_in_server_container() {
+  ensure_running_server_container
+  run_in_server_container_with_tmp_install "${COMMAND_ARGS[@]}"
+}
+
+run_in_server_container_with_tmp_install() {
+  local shell_args=("$@")
+
+  run_docker_exec \
+    "$SERVER_CONTAINER_NAME" \
+    bash -lc '
+set -euo pipefail
+tmp_install_bin="/workspace/build/tmp_install/usr/local/pgsql/bin"
+tmp_install_lib="/workspace/build/tmp_install/usr/local/pgsql/lib"
+export PATH="$tmp_install_bin:$PATH"
+
+lib_paths=()
+if [ -d "$tmp_install_lib" ]; then
+  lib_paths+=("$tmp_install_lib")
+  while IFS= read -r dir; do
+    lib_paths+=("$dir")
+  done < <(find "$tmp_install_lib" -mindepth 1 -maxdepth 1 -type d | sort)
+fi
+
+joined_lib_paths=""
+if [ "${#lib_paths[@]}" -gt 0 ]; then
+  joined_lib_paths="$(printf "%s:" "${lib_paths[@]}")"
+  joined_lib_paths="${joined_lib_paths%:}"
+fi
+
+export LD_LIBRARY_PATH="${joined_lib_paths}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [ "$#" -eq 0 ]; then
+  exec bash
+fi
+
+exec "$@"
+' bash "${shell_args[@]}"
+}
+
 run_psql() {
-  command -v psql >/dev/null 2>&1 || die "psql not found on PATH"
+  local psql_args=(env PGUSER=postgres PGDATABASE=postgres psql -h localhost -p "$PORT")
+
+  ensure_running_server_container
+
   if [ "${#COMMAND_ARGS[@]}" -gt 0 ]; then
-    PGUSER=postgres PGDATABASE=postgres psql -h localhost -p "$PORT" "${COMMAND_ARGS[@]}"
-  else
-    PGUSER=postgres PGDATABASE=postgres psql -h localhost -p "$PORT"
+    psql_args+=("${COMMAND_ARGS[@]}")
   fi
+
+  run_in_server_container_with_tmp_install "${psql_args[@]}"
 }
 
 export_testlogs() {
@@ -571,6 +647,7 @@ case "$COMMAND" in
     derive_source_dir
     validate_source_dir
     compute_volume_name
+    compute_server_container_name
     ensure_image
     run_container
     ;;
@@ -597,8 +674,16 @@ case "$COMMAND" in
     resolve_logreport_path
     report_testlogs
     ;;
-  psql)
-    run_psql
+  exec|psql)
+    derive_source_dir
+    validate_source_dir
+    compute_volume_name
+    compute_server_container_name
+    if [ "$COMMAND" = "exec" ]; then
+      exec_in_server_container
+    else
+      run_psql
+    fi
     ;;
   clean)
     derive_source_dir

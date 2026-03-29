@@ -79,6 +79,13 @@ Connect from another terminal:
 pgdev --source ~/repos/postgresql psql
 ```
 
+Run a command inside the running server container:
+
+```bash
+pgdev --source ~/repos/postgresql exec
+pgdev --source ~/repos/postgresql exec psql -c 'select version()'
+```
+
 
 Normal Edit/Build/Run Flow
 --------------------------
@@ -204,6 +211,17 @@ pgdev --source ~/repos/postgresql --port 55433 psql
 pgdev --source ~/repos/postgresql psql -c 'select version()'
 ```
 
+`pgdev psql` uses the matching `psql` from the running server container's
+temporary install, so the client major version tracks the checked-out
+PostgreSQL branch instead of the host's `psql`.
+
+Run a command inside the running server container:
+
+```bash
+pgdev --source ~/repos/postgresql exec
+pgdev --source ~/repos/postgresql exec bash -lc 'psql -c "select version()"'
+```
+
 Start the server on a different port:
 
 ```bash
@@ -300,6 +318,8 @@ Notes
   wrapper image.
 - The default database superuser in this workflow is `postgres`.
 - `pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
+- `pgdev exec` and `pgdev psql` target the running `pgdev server` container
+  for the current workspace.
 - `pgdev docs` builds documentation under `/workspace/build/doc/src/sgml` in
   the Docker volume.
 - `pgdev getdocs` exports `/workspace/build/doc/src/sgml` to
