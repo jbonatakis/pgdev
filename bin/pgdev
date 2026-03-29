@@ -8,6 +8,9 @@ IMAGE_NAME="${PG_DEV_IMAGE:-pgdev-postgresql:local}"
 SOURCE_DIR="${PG_DEV_SOURCE:-}"
 WORKSPACE_KEY="${PG_DEV_WORKSPACE_KEY:-}"
 PORT="${PG_DEV_PORT:-55432}"
+SHM_SIZE="${PG_DEV_SHM_SIZE:-1g}"
+BUILD_JOBS="${PG_DEV_BUILD_JOBS:-}"
+TEST_JOBS="${PG_DEV_TEST_JOBS:-}"
 COMMAND_ARGS=()
 
 docker_run_args=(--rm)
@@ -23,6 +26,9 @@ Global options:
   --source PATH         PostgreSQL checkout to build and run
   --workspace-key KEY   Stable identifier for the Docker volume
   --port PORT           Host and container port for the server (default: $PORT)
+  --shm-size SIZE       Docker /dev/shm size for the container (default: $SHM_SIZE)
+  --build-jobs N        Override PG_BUILD_JOBS inside the container
+  --test-jobs N         Override PG_TEST_JOBS inside the container
   --image NAME          Override the Docker image name
   -h, --help            Show this help
 
@@ -31,6 +37,8 @@ Commands:
   configure     Create or reconfigure the Meson build directory
   build         Compile PostgreSQL and test dependencies
   test          Run the default Meson test suite
+  testlogs      Export Meson test logs to the host
+  logreport     Summarize failures and skips from testlog.json
   runningcheck  Run tests against a manually started server
   server        Run postgres in the foreground
   psql          Connect to the running server with sensible defaults
@@ -41,6 +49,10 @@ Examples:
   bin/pgdev build-image
   bin/pgdev --source ~/repos/postgresql build
   bin/pgdev --source ~/repos/postgresql test --suite recovery
+  bin/pgdev --source ~/repos/postgresql testlogs
+  bin/pgdev --source ~/repos/postgresql logreport
+  bin/pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
+  bin/pgdev --source ~/repos/postgresql testlogs ~/Downloads/pgdev-logs
   bin/pgdev --source ~/repos/postgresql --port 55433 server
   bin/pgdev --source ~/repos/postgresql psql
 EOF
@@ -73,6 +85,21 @@ parse_args() {
       --port)
         [ "$#" -ge 2 ] || die "--port requires a value"
         PORT="$2"
+        shift 2
+        ;;
+      --shm-size)
+        [ "$#" -ge 2 ] || die "--shm-size requires a value"
+        SHM_SIZE="$2"
+        shift 2
+        ;;
+      --build-jobs)
+        [ "$#" -ge 2 ] || die "--build-jobs requires a value"
+        BUILD_JOBS="$2"
+        shift 2
+        ;;
+      --test-jobs)
+        [ "$#" -ge 2 ] || die "--test-jobs requires a value"
+        TEST_JOBS="$2"
         shift 2
         ;;
       --image)
@@ -152,20 +179,43 @@ ensure_image() {
   fi
 }
 
+source_mount_mode() {
+  case "$COMMAND" in
+    test|runningcheck)
+      printf '%s' 'rw'
+      ;;
+    *)
+      printf '%s' 'ro'
+      ;;
+  esac
+}
+
 run_container() {
+  local source_mount_mode_value
+  local docker_args
+
+  source_mount_mode_value="$(source_mount_mode)"
+  docker_args=("${docker_run_args[@]}" --shm-size "$SHM_SIZE" -e PGPORT="$PORT")
+
+  if [ -n "$BUILD_JOBS" ]; then
+    docker_args+=(-e "PG_BUILD_JOBS=$BUILD_JOBS")
+  fi
+
+  if [ -n "$TEST_JOBS" ]; then
+    docker_args+=(-e "PG_TEST_JOBS=$TEST_JOBS")
+  fi
+
   if [ "${#COMMAND_ARGS[@]}" -gt 0 ]; then
-    docker run "${docker_run_args[@]}" \
-      -e PGPORT="$PORT" \
-      -v "$SOURCE_DIR:/src:ro" \
+    docker run "${docker_args[@]}" \
+      -v "$SOURCE_DIR:/src:$source_mount_mode_value" \
       -v "$VOLUME_NAME:/workspace" \
       -p "127.0.0.1:$PORT:$PORT" \
       "$IMAGE_NAME" \
       "$COMMAND" \
       "${COMMAND_ARGS[@]}"
   else
-    docker run "${docker_run_args[@]}" \
-      -e PGPORT="$PORT" \
-      -v "$SOURCE_DIR:/src:ro" \
+    docker run "${docker_args[@]}" \
+      -v "$SOURCE_DIR:/src:$source_mount_mode_value" \
       -v "$VOLUME_NAME:/workspace" \
       -p "127.0.0.1:$PORT:$PORT" \
       "$IMAGE_NAME" \
@@ -186,6 +236,216 @@ run_psql() {
   fi
 }
 
+export_testlogs() {
+  local dest_root
+  local dest_dir
+
+  if [ "${#COMMAND_ARGS[@]}" -gt 1 ]; then
+    die "testlogs accepts at most one destination directory"
+  fi
+
+  if [ "${#COMMAND_ARGS[@]}" -eq 1 ]; then
+    dest_root="${COMMAND_ARGS[0]}"
+  else
+    dest_root="$PWD/pgdev-logs/$(safe_name "$WORKSPACE_KEY")"
+  fi
+
+  mkdir -p "$dest_root"
+  dest_dir="$(cd "$dest_root" && pwd -P)"
+
+  docker run --rm \
+    -v "$VOLUME_NAME:/workspace:ro" \
+    -v "$dest_dir:/out" \
+    "$IMAGE_NAME" \
+    bash -lc '
+set -euo pipefail
+if [ ! -d /workspace/build/meson-logs ]; then
+  echo "meson logs not found in /workspace/build/meson-logs" >&2
+  exit 1
+fi
+rm -rf /out/meson-logs
+mkdir -p /out/meson-logs
+cp -a /workspace/build/meson-logs/. /out/meson-logs/
+'
+
+  printf 'exported meson logs to %s\n' "$dest_dir/meson-logs"
+}
+
+resolve_logreport_path() {
+  local input_path=""
+
+  if [ "${#COMMAND_ARGS[@]}" -gt 1 ]; then
+    die "logreport accepts at most one path"
+  fi
+
+  if [ "${#COMMAND_ARGS[@]}" -eq 1 ]; then
+    input_path="${COMMAND_ARGS[0]}"
+
+    if [ -f "$input_path" ]; then
+      REPORT_JSON_PATH="$(cd "$(dirname "$input_path")" && pwd -P)/$(basename "$input_path")"
+      return
+    fi
+
+    if [ -d "$input_path" ]; then
+      if [ -f "$input_path/testlog.json" ]; then
+        REPORT_JSON_PATH="$(cd "$input_path" && pwd -P)/testlog.json"
+        return
+      fi
+
+      if [ -f "$input_path/meson-logs/testlog.json" ]; then
+        REPORT_JSON_PATH="$(cd "$input_path/meson-logs" && pwd -P)/testlog.json"
+        return
+      fi
+    fi
+
+    die "could not find testlog.json under $input_path"
+  fi
+
+  REPORT_JSON_PATH="$PWD/pgdev-logs/$(safe_name "$WORKSPACE_KEY")/meson-logs/testlog.json"
+  [ -f "$REPORT_JSON_PATH" ] || die "testlog.json not found at $REPORT_JSON_PATH; run testlogs first or pass a path"
+}
+
+report_testlogs() {
+  command -v python3 >/dev/null 2>&1 || die "python3 not found on PATH"
+
+  python3 - "$REPORT_JSON_PATH" <<'PY'
+import collections
+import json
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+
+skip_re = re.compile(r"^1\.\.0 # SKIP(?:ped:)?\s*(.*)$", re.IGNORECASE)
+noise_prefixes = (
+    "# executing test in ",
+    "# initializing database system by ",
+    "# using temp instance on port ",
+    "# test succeeded",
+    "# test failed",
+)
+
+
+def load_entries(json_path: pathlib.Path):
+    text = json_path.read_text(encoding="utf-8")
+    stripped = text.strip()
+
+    if not stripped:
+        return []
+
+    if stripped.startswith("["):
+        data = json.loads(stripped)
+        if not isinstance(data, list):
+            raise SystemExit(f"{json_path}: expected a JSON array")
+        return data
+
+    entries = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"{json_path}:{lineno}: invalid JSON: {exc}") from exc
+    return entries
+
+
+def extract_skip_reason(stdout: str) -> str:
+    for line in stdout.splitlines():
+        match = skip_re.match(line)
+        if match:
+            reason = match.group(1).strip()
+            return reason or "no reason provided"
+    return "no reason provided"
+
+
+def extract_failure_details(entry):
+    details = []
+    seen = set()
+
+    def add(line: str):
+        stripped = line.strip()
+        if not stripped or stripped in seen:
+            return
+        seen.add(stripped)
+        details.append(stripped)
+
+    for source in (entry.get("stdout") or "", entry.get("stderr") or ""):
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("Bail out!"):
+                add(stripped)
+            elif stripped.startswith("not ok "):
+                add(stripped)
+            elif stripped.startswith("#   Failed test "):
+                add(stripped)
+            elif stripped.startswith("Looks like you failed "):
+                add(stripped)
+            elif stripped.startswith("ERROR:") or stripped.startswith("FATAL:") or stripped.startswith("PANIC:"):
+                add(stripped)
+
+    if details:
+        return details[:5]
+
+    for source in (entry.get("stdout") or "", entry.get("stderr") or ""):
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if any(stripped.startswith(prefix) for prefix in noise_prefixes):
+                continue
+            if re.match(r"^1\.\.\d+", stripped):
+                continue
+            if stripped == "(test program exited with status code 255)":
+                continue
+            add(stripped)
+
+    if details:
+        return details[:5]
+
+    return ["no additional detail captured"]
+
+
+entries = load_entries(path)
+failures = [entry for entry in entries if entry.get("result") not in ("OK", "SKIP")]
+skips = [entry for entry in entries if entry.get("result") == "SKIP"]
+
+print(f"Log report: {path}")
+print(f"Total entries: {len(entries)}")
+print(f"Failures: {len(failures)}")
+print(f"Skips: {len(skips)}")
+
+if failures:
+    print("\nFailures")
+    for entry in failures:
+        name = entry.get("name", "<unnamed>")
+        result = entry.get("result", "<unknown>")
+        returncode = entry.get("returncode")
+        result_text = result if returncode is None else f"{result} (returncode {returncode})"
+        print(f"- {name}")
+        print(f"  result: {result_text}")
+        for detail in extract_failure_details(entry):
+            print(f"  info: {detail}")
+
+if skips:
+    reason_counts = collections.Counter(
+        extract_skip_reason(entry.get("stdout") or "") for entry in skips
+    )
+
+    print("\nSkip Reasons")
+    for reason, count in sorted(reason_counts.items(), key=lambda item: (-item[1], item[0])):
+        print(f"- {count} x {reason}")
+
+    print("\nSkipped Tests")
+    for entry in skips:
+        print(f"- {entry.get('name', '<unnamed>')}")
+        print(f"  reason: {extract_skip_reason(entry.get('stdout') or '')}")
+PY
+}
+
 parse_args "$@"
 
 case "$COMMAND" in
@@ -198,6 +458,22 @@ case "$COMMAND" in
     compute_volume_name
     ensure_image
     run_container
+    ;;
+  testlogs)
+    derive_source_dir
+    validate_source_dir
+    compute_volume_name
+    ensure_image
+    export_testlogs
+    ;;
+  logreport)
+    if [ "${#COMMAND_ARGS[@]}" -eq 0 ]; then
+      derive_source_dir
+      validate_source_dir
+      compute_volume_name
+    fi
+    resolve_logreport_path
+    report_testlogs
     ;;
   psql)
     run_psql

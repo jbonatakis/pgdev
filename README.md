@@ -1,9 +1,7 @@
 pgdev
 =====
 
-`pgdev` is a standalone Docker-based development wrapper for PostgreSQL
-checkouts. It lets you keep the workflow in its own repo while pointing it at
-one or more local PostgreSQL source trees.
+`pgdev` is a standalone Docker-based development wrapper for PostgreSQL. 
 
 What It Does
 ------------
@@ -14,13 +12,13 @@ What It Does
 - runs configure, build, tests, and a foreground server from the chosen source tree
 
 This keeps the dev tooling independent from the PostgreSQL repo while still
-building and running your local changes.
+building and running local changes.
 
 
 Layout
 ------
 
-- `bin/pgdev` is the host-side command you run
+- `pgdev` is the host-side command you run
 - `docker/Dockerfile.dev` builds the toolchain image
 - `docker/dev-entrypoint.sh` runs inside the container
 
@@ -28,34 +26,49 @@ Layout
 Quick Start
 -----------
 
+First, add `pgdev` to `$PATH`.
+
 Build the toolchain image once:
 
 ```bash
-bin/pgdev build-image
+pgdev build-image
 ```
 
 Build a PostgreSQL checkout or local changes:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql build
+pgdev --source ~/repos/postgresql build
 ```
 
 Run tests:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql test
+pgdev --source ~/repos/postgresql test
+```
+
+Pull the Meson test logs onto the host:
+
+```bash
+pgdev --source ~/repos/postgresql testlogs
+```
+
+Summarize failures and skips from an exported log:
+
+```bash
+pgdev --source ~/repos/postgresql logreport
+pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
 ```
 
 Start the server:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql server
+pgdev --source ~/repos/postgresql server
 ```
 
 Connect from another terminal:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql psql
+pgdev --source ~/repos/postgresql psql
 ```
 
 
@@ -66,25 +79,25 @@ Normal Edit/Build/Run Flow
 2. Rebuild:
 
    ```bash
-   bin/pgdev --source ~/repos/postgresql build
+   pgdev --source ~/repos/postgresql build
    ```
 
 3. Run tests if needed:
 
    ```bash
-   bin/pgdev --source ~/repos/postgresql test
+   pgdev --source ~/repos/postgresql test
    ```
 
 4. Start the rebuilt server:
 
    ```bash
-   bin/pgdev --source ~/repos/postgresql server
+   pgdev --source ~/repos/postgresql server
    ```
 
 5. Connect:
 
    ```bash
-   bin/pgdev --source ~/repos/postgresql psql
+   pgdev --source ~/repos/postgresql psql
    ```
 
 The running server does not hot-reload binaries. If you change code, stop the
@@ -97,65 +110,79 @@ Commands
 Build or rebuild the image:
 
 ```bash
-bin/pgdev build-image
+pgdev build-image
 ```
 
 Configure:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql configure
+pgdev --source ~/repos/postgresql configure
 ```
 
 Build:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql build
+pgdev --source ~/repos/postgresql build
 ```
 
 Run the default test set:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql test
+pgdev --source ~/repos/postgresql test
+```
+
+Export the Meson log directory, including `testlog.txt` and `testlog.json`:
+
+```bash
+pgdev --source ~/repos/postgresql testlogs
+pgdev --source ~/repos/postgresql testlogs ~/Downloads/pgdev-logs
+```
+
+Summarize failures and skips from `testlog.json`:
+
+```bash
+pgdev --source ~/repos/postgresql logreport
+pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
 ```
 
 Run a suite or specific tests:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql test --suite recovery
-bin/pgdev --source ~/repos/postgresql test recovery/017_shm
-bin/pgdev --source ~/repos/postgresql test recovery/017_shm recovery/018_wal_optimize
+pgdev --source ~/repos/postgresql test --suite recovery
+pgdev --source ~/repos/postgresql test recovery/017_shm
+pgdev --source ~/repos/postgresql test recovery/017_shm recovery/018_wal_optimize
 ```
 
 Run tests against a manually started server:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql runningcheck
+pgdev --source ~/repos/postgresql runningcheck
 ```
 
 Open a shell:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql shell
+pgdev --source ~/repos/postgresql shell
 ```
 
 Open `psql` with defaults for this workflow:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql psql
-bin/pgdev --source ~/repos/postgresql --port 55433 psql
-bin/pgdev --source ~/repos/postgresql psql -c 'select version()'
+pgdev --source ~/repos/postgresql psql
+pgdev --source ~/repos/postgresql --port 55433 psql
+pgdev --source ~/repos/postgresql psql -c 'select version()'
 ```
 
 Start the server on a different port:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql --port 55433 server
+pgdev --source ~/repos/postgresql --port 55433 server
 ```
 
 Remove the build/data volume for a checkout:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql clean
+pgdev --source ~/repos/postgresql clean
 ```
 
 
@@ -170,13 +197,13 @@ so different checkouts get different persistent build and data state.
 Examples:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql-master build
-bin/pgdev --source ~/repos/postgresql-master server
+pgdev --source ~/repos/postgresql-master build
+pgdev --source ~/repos/postgresql-master server
 ```
 
 ```bash
-bin/pgdev --source ~/repos/postgresql-v18 build
-bin/pgdev --source ~/repos/postgresql-v18 --port 55433 server
+pgdev --source ~/repos/postgresql-v18 build
+pgdev --source ~/repos/postgresql-v18 --port 55433 server
 ```
 
 That lets you jump between versions without clobbering each checkout's build
@@ -185,8 +212,8 @@ tree or cluster.
 If you want to override the volume identity manually, use `--workspace-key`:
 
 ```bash
-bin/pgdev --source ~/repos/postgresql --workspace-key rel18 build
-bin/pgdev --source ~/repos/postgresql --workspace-key rel18 server
+pgdev --source ~/repos/postgresql --workspace-key rel18 build
+pgdev --source ~/repos/postgresql --workspace-key rel18 server
 ```
 
 
@@ -198,6 +225,9 @@ Global options:
 - `--source PATH` selects the PostgreSQL checkout
 - `--workspace-key KEY` overrides the derived workspace identity
 - `--port PORT` changes the forwarded port
+- `--shm-size SIZE` sets the Docker `/dev/shm` size used by the container
+- `--build-jobs N` overrides `PG_BUILD_JOBS` inside the container
+- `--test-jobs N` overrides `PG_TEST_JOBS` inside the container
 - `--image NAME` changes the Docker image name
 
 Environment variables:
@@ -205,6 +235,9 @@ Environment variables:
 - `PG_DEV_SOURCE`
 - `PG_DEV_WORKSPACE_KEY`
 - `PG_DEV_PORT`
+- `PG_DEV_SHM_SIZE`
+- `PG_DEV_BUILD_JOBS`
+- `PG_DEV_TEST_JOBS`
 - `PG_DEV_IMAGE`
 - `PG_DEV_VOLUME`
 
@@ -214,9 +247,19 @@ Environment variables:
 Notes
 -----
 
-- The source checkout is mounted read-only into the container.
-- Build artifacts live in a Docker volume, not in the PostgreSQL repo.
+- The source checkout is mounted read-only for most commands.
+- `pgdev test` and `pgdev runningcheck` mount the source checkout
+  writable because some PostgreSQL tests generate temporary files alongside
+  source fixtures.
+- The container defaults to `--shm-size=1g`, and you can raise or lower that
+  with `--shm-size` or `PG_DEV_SHM_SIZE`.
+- Build artifacts live in a Docker volume, not in a local repo.
 - The default database superuser in this workflow is `postgres`.
-- `bin/pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
+- `pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
+- `pgdev testlogs` exports `/workspace/build/meson-logs` to
+  `./pgdev-logs/<workspace-key>/meson-logs` by default.
+- `pgdev logreport` reads `testlog.json` and prints failures and skip
+  reasons. With `--source`, it defaults to
+  `./pgdev-logs/<workspace-key>/meson-logs/testlog.json`.
 - Host TCP access is configured for this dev environment, and the port is
   published only on `127.0.0.1` on the host.
