@@ -55,9 +55,79 @@ MESON_BASE_ARGS=(
   -Dzlib=enabled
   -Dzstd=enabled
 )
+SUPPORTED_MESON_OPTIONS=()
+FILTERED_MESON_ARGS=()
 
 ensure_dirs() {
   mkdir -p "$WORKSPACE_DIR" "$LOG_DIR" "$CCACHE_DIR"
+}
+
+find_meson_options_file() {
+  local path
+
+  for path in "$SOURCE_DIR/meson.options" "$SOURCE_DIR/meson_options.txt"; do
+    if [ -f "$path" ]; then
+      printf '%s' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+load_supported_meson_options() {
+  local options_file
+
+  if [ "${#SUPPORTED_MESON_OPTIONS[@]}" -gt 0 ]; then
+    return
+  fi
+
+  options_file="$(find_meson_options_file)" || {
+    echo "could not find meson options file in $SOURCE_DIR" >&2
+    exit 1
+  }
+
+  while IFS= read -r option_name; do
+    SUPPORTED_MESON_OPTIONS+=("$option_name")
+  done < <(sed -n "s/^[[:space:]]*option('\\([^']*\\)'.*/\\1/p" "$options_file")
+}
+
+filter_meson_base_args() {
+  local arg
+  local option_name
+  local supported_option
+  local is_supported
+
+  load_supported_meson_options
+  FILTERED_MESON_ARGS=()
+
+  for arg in "${MESON_BASE_ARGS[@]}"; do
+    case "$arg" in
+      -D*=*)
+        option_name="${arg#-D}"
+        option_name="${option_name%%=*}"
+        is_supported=0
+
+        for supported_option in "${SUPPORTED_MESON_OPTIONS[@]}"; do
+          if [ "$supported_option" = "$option_name" ]; then
+            is_supported=1
+            break
+          fi
+        done
+
+        if [ "$is_supported" -eq 1 ]; then
+          FILTERED_MESON_ARGS+=("$arg")
+        fi
+        ;;
+      *)
+        FILTERED_MESON_ARGS+=("$arg")
+        ;;
+    esac
+  done
+}
+
+has_complete_build_dir() {
+  [ -f "$BUILD_DIR/build.ninja" ] && [ -d "$BUILD_DIR/meson-private" ]
 }
 
 ensure_dev_pg_hba() {
@@ -110,23 +180,28 @@ ensure_tmp_install_env() {
 
 configure_build() {
   ensure_dirs
+  filter_meson_base_args
+
+  if [ -d "$BUILD_DIR/meson-private" ] && [ ! -f "$BUILD_DIR/build.ninja" ]; then
+    rm -rf "$BUILD_DIR"
+  fi
 
   local reconfigure=()
-  if [ -d "$BUILD_DIR/meson-private" ]; then
+  if has_complete_build_dir; then
     reconfigure=(--reconfigure)
   fi
 
   env CC="ccache gcc" CXX="ccache g++" CCACHE_DIR="$CCACHE_DIR" \
     meson setup \
     "${reconfigure[@]}" \
-    "${MESON_BASE_ARGS[@]}" \
+    "${FILTERED_MESON_ARGS[@]}" \
     "$@" \
     "$BUILD_DIR" \
     "$SOURCE_DIR"
 }
 
 ensure_configured() {
-  if [ ! -d "$BUILD_DIR/meson-private" ]; then
+  if ! has_complete_build_dir; then
     configure_build
   fi
 }

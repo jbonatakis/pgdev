@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 IMAGE_NAME="${PG_DEV_IMAGE:-pgdev-postgresql:local}"
-SOURCE_DIR="${PGDEV_BASE:-}"
+SOURCE_DIR=""
+DEFAULT_SOURCE_DIR="${PGDEV_BASE:-}"
 WORKSPACE_KEY="${PG_DEV_WORKSPACE_KEY:-}"
 PORT="${PG_DEV_PORT:-55432}"
 SHM_SIZE="${PG_DEV_SHM_SIZE:-1g}"
@@ -78,6 +79,13 @@ safe_name() {
   local value="$1"
   value="${value//[^a-zA-Z0-9_.-]/-}"
   printf '%s' "$value"
+}
+
+looks_like_postgresql_checkout() {
+  local dir="$1"
+  [ -f "$dir/meson.build" ] &&
+    [ -f "$dir/configure" ] &&
+    [ -f "$dir/src/tools/ci/pg_ci_base.conf" ]
 }
 
 parse_args() {
@@ -153,12 +161,17 @@ derive_source_dir() {
     return
   fi
 
-  if [ -f "$PWD/meson.build" ] && [ -f "$PWD/configure" ] && [ -f "$PWD/src/tools/ci/pg_ci_base.conf" ]; then
+  if looks_like_postgresql_checkout "$PWD"; then
     SOURCE_DIR="$(cd "$PWD" && pwd -P)"
     return
   fi
 
-  die "no PostgreSQL source checkout specified; use --source PATH"
+  if [ -n "$DEFAULT_SOURCE_DIR" ]; then
+    SOURCE_DIR="$(cd "$DEFAULT_SOURCE_DIR" && pwd -P)"
+    return
+  fi
+
+  die "no PostgreSQL source checkout specified; use --source PATH or set PGDEV_BASE"
 }
 
 validate_source_dir() {

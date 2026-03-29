@@ -225,6 +225,10 @@ Multiple PostgreSQL Checkouts
 By default, the workspace volume name is derived from the absolute source path,
 so different checkouts get different persistent build and data state.
 
+If you run `pgdev` from inside a PostgreSQL checkout or git worktree, that
+current directory is used automatically. `PGDEV_BASE` is only a fallback when
+you are not already standing in a PostgreSQL source tree.
+
 Examples:
 
 ```bash
@@ -277,8 +281,8 @@ Environment variables:
 `PG_DEV_VOLUME` overrides the computed Docker volume name directly.
 If both `PG_TEST_EXTRA` and `--test-extra` are provided, the combined set is
 passed to the container with duplicates removed.
-`PGDEV_BASE` can be used as the default source checkout path and takes the
-place of `--source PATH` when the flag is omitted.
+`PGDEV_BASE` can be used as the default source checkout path when `--source` is
+omitted and the current directory is not already a PostgreSQL checkout.
 
 
 Notes
@@ -291,6 +295,9 @@ Notes
 - The container defaults to `--shm-size=1g`, and you can raise or lower that
   with `--shm-size` or `PG_DEV_SHM_SIZE`.
 - Build artifacts live in a Docker volume, not in a local repo.
+- `pgdev` filters its Meson `-D...` options against the checked-out source
+  tree's supported option set, so older PostgreSQL branches can reuse the same
+  wrapper image.
 - The default database superuser in this workflow is `postgres`.
 - `pgdev psql` defaults to `PGUSER=postgres` and `PGDATABASE=postgres`.
 - `pgdev docs` builds documentation under `/workspace/build/doc/src/sgml` in
