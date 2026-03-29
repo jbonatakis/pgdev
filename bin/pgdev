@@ -11,6 +11,8 @@ PORT="${PG_DEV_PORT:-55432}"
 SHM_SIZE="${PG_DEV_SHM_SIZE:-1g}"
 BUILD_JOBS="${PG_DEV_BUILD_JOBS:-}"
 TEST_JOBS="${PG_DEV_TEST_JOBS:-}"
+TEST_EXTRA_ENV="${PG_TEST_EXTRA:-}"
+TEST_EXTRA_ARGS=()
 COMMAND_ARGS=()
 
 docker_run_args=(--rm)
@@ -29,6 +31,7 @@ Global options:
   --shm-size SIZE       Docker /dev/shm size for the container (default: $SHM_SIZE)
   --build-jobs N        Override PG_BUILD_JOBS inside the container
   --test-jobs N         Override PG_TEST_JOBS inside the container
+  --test-extra LIST     Add PG_TEST_EXTRA categories, space-separated
   --image NAME          Override the Docker image name
   -h, --help            Show this help
 
@@ -49,6 +52,8 @@ Examples:
   bin/pgdev build-image
   bin/pgdev --source ~/repos/postgresql build
   bin/pgdev --source ~/repos/postgresql test --suite recovery
+  bin/pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
+  PG_TEST_EXTRA="ssl ldap" bin/pgdev --source ~/repos/postgresql test
   bin/pgdev --source ~/repos/postgresql testlogs
   bin/pgdev --source ~/repos/postgresql logreport
   bin/pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
@@ -100,6 +105,11 @@ parse_args() {
       --test-jobs)
         [ "$#" -ge 2 ] || die "--test-jobs requires a value"
         TEST_JOBS="$2"
+        shift 2
+        ;;
+      --test-extra)
+        [ "$#" -ge 2 ] || die "--test-extra requires a value"
+        TEST_EXTRA_ARGS+=("$2")
         shift 2
         ;;
       --image)
@@ -190,11 +200,58 @@ source_mount_mode() {
   esac
 }
 
+combine_test_extra() {
+  local value
+  local token
+  local combined=""
+  local seen=" "
+  local index
+
+  for value in "$TEST_EXTRA_ENV"; do
+    for token in $value; do
+      case "$seen" in
+        *" $token "*) ;;
+        *)
+          if [ -n "$combined" ]; then
+            combined="$combined $token"
+          else
+            combined="$token"
+          fi
+          seen="${seen}${token} "
+          ;;
+      esac
+    done
+  done
+
+  if [ "${#TEST_EXTRA_ARGS[@]}" -gt 0 ]; then
+    for index in "${!TEST_EXTRA_ARGS[@]}"; do
+      value="${TEST_EXTRA_ARGS[$index]}"
+      for token in $value; do
+        case "$seen" in
+          *" $token "*) ;;
+          *)
+            if [ -n "$combined" ]; then
+              combined="$combined $token"
+            else
+              combined="$token"
+            fi
+            seen="${seen}${token} "
+            ;;
+        esac
+      done
+    done
+  fi
+
+  printf '%s' "$combined"
+}
+
 run_container() {
   local source_mount_mode_value
   local docker_args
+  local combined_test_extra
 
   source_mount_mode_value="$(source_mount_mode)"
+  combined_test_extra="$(combine_test_extra)"
   docker_args=("${docker_run_args[@]}" --shm-size "$SHM_SIZE" -e PGPORT="$PORT")
 
   if [ -n "$BUILD_JOBS" ]; then
@@ -203,6 +260,10 @@ run_container() {
 
   if [ -n "$TEST_JOBS" ]; then
     docker_args+=(-e "PG_TEST_JOBS=$TEST_JOBS")
+  fi
+
+  if [ -n "$combined_test_extra" ]; then
+    docker_args+=(-e "PG_TEST_EXTRA=$combined_test_extra")
   fi
 
   if [ "${#COMMAND_ARGS[@]}" -gt 0 ]; then

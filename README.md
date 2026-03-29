@@ -46,6 +46,14 @@ Run tests:
 pgdev --source ~/repos/postgresql test
 ```
 
+Enable opt-in PostgreSQL test categories with `PG_TEST_EXTRA` or `--test-extra`:
+
+```bash
+pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
+PG_TEST_EXTRA="ssl ldap" pgdev --source ~/repos/postgresql test
+PG_TEST_EXTRA="ssl" pgdev --source ~/repos/postgresql --test-extra "ldap xid_wraparound" test
+```
+
 Pull the Meson test logs onto the host:
 
 ```bash
@@ -129,6 +137,14 @@ Run the default test set:
 
 ```bash
 pgdev --source ~/repos/postgresql test
+```
+
+Add opt-in PostgreSQL test categories:
+
+```bash
+pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
+PG_TEST_EXTRA="ssl ldap" pgdev --source ~/repos/postgresql test
+PG_TEST_EXTRA="ssl" pgdev --source ~/repos/postgresql --test-extra "ldap xid_wraparound" test
 ```
 
 Export the Meson log directory, including `testlog.txt` and `testlog.json`:
@@ -228,6 +244,7 @@ Global options:
 - `--shm-size SIZE` sets the Docker `/dev/shm` size used by the container
 - `--build-jobs N` overrides `PG_BUILD_JOBS` inside the container
 - `--test-jobs N` overrides `PG_TEST_JOBS` inside the container
+- `--test-extra LIST` adds categories to `PG_TEST_EXTRA`
 - `--image NAME` changes the Docker image name
 
 Environment variables:
@@ -238,10 +255,13 @@ Environment variables:
 - `PG_DEV_SHM_SIZE`
 - `PG_DEV_BUILD_JOBS`
 - `PG_DEV_TEST_JOBS`
+- `PG_TEST_EXTRA`
 - `PG_DEV_IMAGE`
 - `PG_DEV_VOLUME`
 
 `PG_DEV_VOLUME` overrides the computed Docker volume name directly.
+If both `PG_TEST_EXTRA` and `--test-extra` are provided, the combined set is
+passed to the container with duplicates removed.
 
 
 Notes
