@@ -249,7 +249,7 @@ Global options:
 
 Environment variables:
 
-- `PG_DEV_SOURCE`
+- `PGDEV_BASE`
 - `PG_DEV_WORKSPACE_KEY`
 - `PG_DEV_PORT`
 - `PG_DEV_SHM_SIZE`
@@ -262,6 +262,8 @@ Environment variables:
 `PG_DEV_VOLUME` overrides the computed Docker volume name directly.
 If both `PG_TEST_EXTRA` and `--test-extra` are provided, the combined set is
 passed to the container with duplicates removed.
+`PGDEV_BASE` can be used as the default source checkout path and takes the
+place of `--source PATH` when the flag is omitted.
 
 
 Notes

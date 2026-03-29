@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 IMAGE_NAME="${PG_DEV_IMAGE:-pgdev-postgresql:local}"
-SOURCE_DIR="${PG_DEV_SOURCE:-}"
+SOURCE_DIR="${PGDEV_BASE:-}"
 WORKSPACE_KEY="${PG_DEV_WORKSPACE_KEY:-}"
 PORT="${PG_DEV_PORT:-55432}"
 SHM_SIZE="${PG_DEV_SHM_SIZE:-1g}"
@@ -22,7 +22,7 @@ fi
 
 usage() {
   cat <<EOF
-Usage: bin/pgdev [global-options] <command> [command-args...]
+Usage: pgdev [global-options] <command> [command-args...]
 
 Global options:
   --source PATH         PostgreSQL checkout to build and run
@@ -49,17 +49,17 @@ Commands:
   clean         Remove the Docker volume used for build and data state
 
 Examples:
-  bin/pgdev build-image
-  bin/pgdev --source ~/repos/postgresql build
-  bin/pgdev --source ~/repos/postgresql test --suite recovery
-  bin/pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
-  PG_TEST_EXTRA="ssl ldap" bin/pgdev --source ~/repos/postgresql test
-  bin/pgdev --source ~/repos/postgresql testlogs
-  bin/pgdev --source ~/repos/postgresql logreport
-  bin/pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
-  bin/pgdev --source ~/repos/postgresql testlogs ~/Downloads/pgdev-logs
-  bin/pgdev --source ~/repos/postgresql --port 55433 server
-  bin/pgdev --source ~/repos/postgresql psql
+  pgdev build-image
+  pgdev --source ~/repos/postgresql build
+  pgdev --source ~/repos/postgresql test --suite recovery
+  pgdev --source ~/repos/postgresql --test-extra xid_wraparound test
+  PG_TEST_EXTRA="ssl ldap" pgdev --source ~/repos/postgresql test
+  pgdev --source ~/repos/postgresql testlogs
+  pgdev --source ~/repos/postgresql logreport
+  pgdev logreport ~/Downloads/pgdev-logs/meson-logs/testlog.json
+  pgdev --source ~/repos/postgresql testlogs ~/Downloads/pgdev-logs
+  pgdev --source ~/repos/postgresql --port 55433 server
+  pgdev --source ~/repos/postgresql psql
 EOF
 }
 
